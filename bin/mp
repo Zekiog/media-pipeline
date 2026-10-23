@@ -1,0 +1,10 @@
+#!/bin/sh
+# media-pipeline CLI wrapper. Picks the project venv, falls back to python3.11.
+set -e
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PY="$DIR/../.venv/bin/python"
+if [ ! -x "$PY" ]; then
+  PY=$(command -v python3.11 || command -v python3 || true)
+fi
+[ -n "$PY" ] || { echo "no python interpreter found" >&2; exit 127; }
+exec "$PY" "$DIR/mp_cli.py" "$@"

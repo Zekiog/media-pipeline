@@ -1,0 +1,12 @@
+.venv/
+inbox/*
+!inbox/.gitkeep
+work/
+outbox/
+failures/
+logs/
+samples/
+*.pyc
+__pycache__/
+.env
+.env.*

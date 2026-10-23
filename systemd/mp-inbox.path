@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch the media-pipeline inbox for new media
+
+[Path]
+PathChanged=/home/opc/work/prime/media-pipeline/inbox
+Unit=mp-inbox.service
+
+[Install]
+WantedBy=default.target

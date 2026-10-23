@@ -1,0 +1,8 @@
+[Unit]
+Description=Process media waiting in the media-pipeline inbox
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/opc/work/prime/media-pipeline
+ExecStart=/home/opc/work/prime/media-pipeline/bin/mp watch
+TimeoutStartSec=1800
