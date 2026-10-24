@@ -12,7 +12,7 @@ triggered automatically when media arrives.
 | video (mp4/mov/mkv/webm) | FFmpeg | normalized mp4 (h264+aac), audio wav, keyframe thumbnails |
 | audio (wav/mp3/m4a/ogg/flac) | FFmpeg + faster-whisper | transcript (txt/srt/vtt), 16 kHz mono wav |
 | image (png/jpg/webp/gif) | Pillow + RapidOCR (PP-OCRv4) | OCR text, resized/normalized png, description via LiteLLM vision |
-| any media | LiteLLM proxy | translation of extracted text (EN/TR default) |
+| any media | Pollinations, Gemini or LiteLLM | translation of extracted text (EN/TR default), keyless by default |
 
 No GPU. No torch. ARM-native (aarch64). CPU-only, int8 quantized Whisper.
 

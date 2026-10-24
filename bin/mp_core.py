@@ -10,6 +10,7 @@ CPU-only, no torch, ARM-native. Engines:
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -38,6 +39,14 @@ LITELLM_BASE = os.environ.get("MP_LITELLM_BASE", "http://127.0.0.1:4000/v1")
 LITELLM_KEY = os.environ.get("MP_LITELLM_KEY", "")
 LITELLM_MODEL = os.environ.get("MP_LITELLM_MODEL", "")
 TRANSLATE_TARGET = os.environ.get("MP_TRANSLATE_TARGET", "tr")
+# LLM saglayici zinciri: "auto" = once anahtarsiz Pollinations, sonra anahtarli LiteLLM.
+LLM_PROVIDER = os.environ.get("MP_LLM_PROVIDER", "auto")
+POLLINATIONS_BASE = os.environ.get("MP_POLLINATIONS_BASE", "https://text.pollinations.ai/openai")
+POLLINATIONS_MODEL = os.environ.get("MP_POLLINATIONS_MODEL", "openai")
+POLLINATIONS_WAIT = int(os.environ.get("MP_POLLINATIONS_WAIT", "35"))
+# Google AI Studio (Gemini) ucretsiz tier: vision destekler, anahtar gerekir.
+GEMINI_KEY = os.environ.get("MP_GEMINI_KEY", "")
+GEMINI_MODEL = os.environ.get("MP_GEMINI_MODEL", "gemini-2.0-flash")
 
 
 def ensure_dirs() -> None:
@@ -238,85 +247,209 @@ def ocr_image(path: Path) -> dict[str, Any]:
     }
 
 
-def llm_complete(prompt: str, system: str = "", model: str | None = None,
-                 timeout: int = 120) -> dict[str, Any]:
-    """Call an OpenAI-compatible endpoint (LiteLLM proxy by default)."""
+def _openai_call(base: str, model: str, body: dict, auth: str | None,
+                 timeout: int = 120, wait_on_limit: bool = True,
+                 yol: str = "/chat/completions") -> dict:
+    """OpenAI-uyumlu chat/completions cagrisi.
+
+    Pollinations ucretsiz tier'da 402 FREE_LIMIT doner: IP basina 30 saniyede
+    bir yanit. Bu durumda hata metnindeki "Retry after Ns" degeri kadar
+    beklenip bir kez daha denenir.
+    """
     import urllib.request
     import urllib.error
 
-    if not LITELLM_KEY:
-        return {"error": "no API key configured (MP_LITELLM_KEY)"}
-    m = model or LITELLM_MODEL
-    if not m:
-        return {"error": "no model configured (MP_LITELLM_MODEL)"}
-    body = {
-        "model": m,
-        "messages": ([{"role": "system", "content": system}] if system else [])
-        + [{"role": "user", "content": prompt}],
-        "temperature": 0.2,
+    headers = {"Content-Type": "application/json"}
+    if auth:
+        headers["Authorization"] = auth
+    deneme = 0
+    while True:
+        url = f"{base.rstrip('/')}{yol}" if yol else base.rstrip("/")
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = json.loads(r.read().decode())
+            return {"text": data["choices"][0]["message"]["content"],
+                    "model": data.get("model", model)}
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode()
+            bekle = 0
+            try:
+                hata = json.loads(raw)
+                if e.code == 402 and hata.get("error", {}).get("code") == "FREE_LIMIT":
+                    m = re.search(r"Retry after (\d+)s", hata["error"].get("message", ""))
+                    bekle = int(m.group(1)) if m else 20
+            except Exception:
+                pass
+            if wait_on_limit and bekle and deneme < 1:
+                deneme += 1
+                time.sleep(min(bekle, POLLINATIONS_WAIT))
+                continue
+            return {"error": f"HTTP {e.code}: {raw[:300]}"}
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def _gemini_call(model: str, metin: str, resim_b64: str | None = None,
+                 mime: str = "image/png", timeout: int = 120) -> dict:
+    """Google AI Studio (Gemini) native generateContent cagrisi.
+
+    Ucretsiz tier: gunde 20 istek. Gorsel girdi inline_data ile gonderilir.
+    """
+    import base64
+    import urllib.request
+    import urllib.error
+
+    parcalar = [{"text": metin}]
+    if resim_b64:
+        parcalar.append({"inline_data": {"mime_type": mime, "data": resim_b64}})
+    govde = {
+        "contents": [{"role": "user", "parts": parcalar}],
+        "generationConfig": {"temperature": 0.2},
     }
-    req = urllib.request.Request(
-        f"{LITELLM_BASE}/chat/completions",
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {LITELLM_KEY}"},
-    )
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+           f":generateContent?key={GEMINI_KEY}")
+    req = urllib.request.Request(url, data=json.dumps(govde).encode(),
+                                 headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             data = json.loads(r.read().decode())
-        return {"text": data["choices"][0]["message"]["content"], "model": data.get("model", m)}
+        parca = data["candidates"][0]["content"]["parts"][0].get("text", "")
+        return {"text": parca, "model": model}
     except urllib.error.HTTPError as e:
         return {"error": f"HTTP {e.code}: {e.read().decode()[:300]}"}
     except Exception as exc:
         return {"error": f"{type(exc).__name__}: {exc}"}
 
+
+def _saglayicilar() -> list:
+    """Kullanilacak saglayici sirasi. Pollinations anahtarsiz, LiteLLM anahtar ister."""
+    sec = (LLM_PROVIDER or "auto").lower()
+    if sec == "none":
+        return []
+    zincir = []
+    if sec in ("auto", "pollinations"):
+        zincir.append("pollinations")
+    if sec in ("auto", "gemini") and GEMINI_KEY:
+        zincir.append("gemini")
+    if sec in ("auto", "litellm") and LITELLM_KEY:
+        zincir.append("litellm")
+    return zincir
+
+def llm_complete(prompt: str, system: str = "", model: str | None = None,
+                 timeout: int = 120) -> dict[str, Any]:
+    """Call an OpenAI-compatible endpoint.
+
+    Keyless Pollinations first, then the LiteLLM proxy when a key is set.
+    """
+    zincir = _saglayicilar()
+    if not zincir:
+        return {"error": "no provider configured (MP_LLM_PROVIDER / MP_LITELLM_KEY)"}
+    mesajlar = ([{"role": "system", "content": system}] if system else []) + \
+               [{"role": "user", "content": prompt}]
+    hatalar = []
+    for saglayici in zincir:
+        if saglayici == "pollinations":
+            m = model or POLLINATIONS_MODEL
+            r = _openai_call(POLLINATIONS_BASE, m,
+                             {"model": m, "messages": mesajlar, "temperature": 0.2},
+                             auth=None, timeout=timeout, yol="")
+        elif saglayici == "gemini":
+            r = _gemini_call(GEMINI_MODEL, prompt)
+        else:
+            m = model or LITELLM_MODEL
+            if not m:
+                hatalar.append("litellm: MP_LITELLM_MODEL yok")
+                continue
+            r = _openai_call(LITELLM_BASE, m,
+                             {"model": m, "messages": mesajlar, "temperature": 0.2},
+                             auth=f"Bearer {LITELLM_KEY}", timeout=timeout,
+                             wait_on_limit=False)
+        if "error" not in r:
+            return {"text": r["text"].strip(), "model": r.get("model"), "provider": saglayici}
+        hatalar.append(f"{saglayici}: {r['error']}")
+    return {"error": "; ".join(hatalar)}
 
 def translate_text(text: str, target: str = TRANSLATE_TARGET,
                    source: str = "auto") -> dict[str, Any]:
+    """Translate text with the configured provider chain."""
     if not text.strip():
         return {"text": "", "skipped": "empty input"}
-    prompt = (
-        f"Translate the following text into {target}. "
-        f"Reply with the translation only, no notes.\n\n{text}"
-    )
-    r = llm_complete(prompt, system="You are a precise translator. Output only the translation.")
-    if "error" in r:
-        return r
-    return {"text": r["text"].strip(), "target": target, "source": source}
-
+    zincir = _saglayicilar()
+    if not zincir:
+        return {"error": "no translation provider configured (MP_LLM_PROVIDER=none)"}
+    sistem = "You are a precise translator. Output only the translation."
+    mesajlar = [{"role": "system", "content": sistem},
+                {"role": "user", "content":
+                 f"Translate the following text into {target}. "
+                 f"Reply with the translation only, no notes.\n\n{text}"}]
+    hatalar = []
+    for saglayici in zincir:
+        if saglayici == "pollinations":
+            m = POLLINATIONS_MODEL
+            r = _openai_call(POLLINATIONS_BASE, m,
+                             {"model": m, "messages": mesajlar, "temperature": 0.2},
+                             auth=None, timeout=120, yol="")
+        elif saglayici == "gemini":
+            r = _gemini_call(GEMINI_MODEL,
+                             f"Translate the following text into {target}. "
+                             f"Reply with the translation only, no notes.\n\n{text}")
+        else:
+            m = LITELLM_MODEL
+            if not m:
+                hatalar.append("litellm: MP_LITELLM_MODEL yok")
+                continue
+            r = _openai_call(LITELLM_BASE, m,
+                             {"model": m, "messages": mesajlar, "temperature": 0.2},
+                             auth=f"Bearer {LITELLM_KEY}", timeout=120,
+                             wait_on_limit=False)
+        if "error" not in r:
+            return {"text": r["text"].strip(), "target": target, "source": source,
+                    "provider": saglayici, "model": r.get("model")}
+        hatalar.append(f"{saglayici}: {r['error']}")
+    return {"error": "; ".join(hatalar), "target": target, "source": source}
 
 def describe_image(path: Path) -> dict[str, Any]:
-    """Describe an image via a vision-capable model on the LiteLLM proxy."""
+    """Describe an image with a vision model.
+
+    Provider chain: keyless Pollinations vision first, then the LiteLLM proxy
+    when an API key is configured. Pollinations allows one reply per 30 s per
+    IP, so a rate limit is reported instead of blocking the job.
+    """
     import base64
     import mimetypes
 
-    if not LITELLM_KEY:
-        return {"error": "no API key configured (MP_LITELLM_KEY)"}
-    m = LITELLM_MODEL
-    if not m:
-        return {"error": "no model configured (MP_LITELLM_MODEL)"}
+    zincir = _saglayicilar()
+    if not zincir:
+        return {"error": "no vision provider configured (MP_LLM_PROVIDER=none)"}
     mime = mimetypes.guess_type(str(path))[0] or "image/png"
     b64 = base64.b64encode(path.read_bytes()).decode()
-    body = {
-        "model": m,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "Describe this image in detail. Then list any visible text verbatim."},
-                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-            ],
-        }],
-        "temperature": 0.2,
-    }
-    req = urllib.request.Request(
-        f"{LITELLM_BASE}/chat/completions",
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {LITELLM_KEY}"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=180) as r:
-            data = json.loads(r.read().decode())
-        return {"text": data["choices"][0]["message"]["content"], "model": data.get("model", m)}
-    except urllib.error.HTTPError as e:
-        return {"error": f"HTTP {e.code}: {e.read().decode()[:300]}"}
-    except Exception as exc:
-        return {"error": f"{type(exc).__name__}: {exc}"}
+    mesajlar = [{"role": "user", "content": [
+        {"type": "text", "text": "Describe this image in detail. Then list any visible text verbatim."},
+        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+    ]}]
+    hatalar = []
+    for saglayici in zincir:
+        if saglayici == "pollinations":
+            # Classic API'deki tek model metin-only (vision: false).
+            hatalar.append("pollinations: vision desteklenmiyor (MP_GEMINI_KEY veya MP_LITELLM_KEY gerekli)")
+            continue
+        if saglayici == "gemini":
+            r = _gemini_call(GEMINI_MODEL,
+                             "Describe this image in detail. "
+                             "Then list any visible text verbatim.",
+                             resim_b64=b64, mime=mime, timeout=180)
+        else:
+            m = LITELLM_MODEL
+            if not m:
+                hatalar.append("litellm: MP_LITELLM_MODEL yok")
+                continue
+            r = _openai_call(LITELLM_BASE, m,
+                             {"model": m, "messages": mesajlar, "temperature": 0.2},
+                             auth=f"Bearer {LITELLM_KEY}", timeout=180,
+                             wait_on_limit=False)
+        if "error" not in r:
+            return {"text": r["text"].strip(), "model": r.get("model"), "provider": saglayici}
+        hatalar.append(f"{saglayici}: {r['error']}")
+    return {"error": "; ".join(hatalar)}
+
