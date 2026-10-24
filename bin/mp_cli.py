@@ -35,6 +35,7 @@ def selftest() -> dict:
         "llm_key_configured": bool(C.LITELLM_KEY),
         "llm_model": C.LITELLM_MODEL or None,
         "llm_base": C.LITELLM_BASE,
+        "llm_provider": C._saglayicilar(),
     }
     try:
         import faster_whisper  # noqa: F401
