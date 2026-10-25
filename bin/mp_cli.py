@@ -193,6 +193,15 @@ def process_file(src: Path, do_stt: bool = True, do_ocr: bool = True,
     if kind == "unknown":
         return {"error": f"unsupported media type: {src.suffix}"}
 
+    # Ayni icerik daha once islendiyse tekrar islemeyelim: Telegram akisinda
+    # prime-tg ve mp watch ayni dosyayi gorur.
+    digest = C.dosya_hash(src)
+    oncekiler = C.seen_yukle()
+    if digest in oncekiler:
+        return {"input": str(src), "skipped": "duplicate",
+                "previous_output": oncekiler[digest].get("output_dir"),
+                "seen_at": oncekiler[digest].get("seen_at")}
+
     job = C.OUTBOX / f"{int(started)}_{src.stem}"
     work = C.WORK / f"{int(started)}_{src.stem}"
     job.mkdir(parents=True, exist_ok=True)
@@ -253,6 +262,10 @@ def process_file(src: Path, do_stt: bool = True, do_ocr: bool = True,
 
     (job / "manifest.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     result["elapsed_s"] = round(time.time() - started, 2)
+    kayit = C.seen_yukle()
+    kayit[digest] = {"output_dir": str(job), "seen_at": int(started),
+                     "input_name": src.name}
+    C.seen_kaydet(kayit)
     return result
 
 
@@ -264,13 +277,19 @@ def cmd_watch() -> dict:
             continue
         r = process_file(p)
         results.append(r)
+        if r.get("skipped") == "duplicate":
+            # Zaten islenmis: dosyayi inbox'ta birakmadan tasima, eski ciktiyi goster.
+            results[-1] = r
+            continue
         dest = C.FAILURES if "error" in r else C.OUTBOX
         dest.mkdir(parents=True, exist_ok=True)
         try:
             shutil.move(str(p), str(dest / p.name))
         except Exception as exc:
             r["move_error"] = str(exc)
-    return {"processed": len(results), "results": results}
+    islenen = [r for r in results if not r.get("skipped")]
+    return {"processed": len(islenen), "skipped": len(results) - len(islenen),
+            "results": results}
 
 
 def main() -> int:

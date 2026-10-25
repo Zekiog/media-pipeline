@@ -49,6 +49,36 @@ GEMINI_KEY = os.environ.get("MP_GEMINI_KEY", "")
 GEMINI_MODEL = os.environ.get("MP_GEMINI_MODEL", "gemini-2.0-flash")
 
 
+def dosya_hash(path: Path) -> str:
+    """sha256 of a file, used to recognise media that was already processed."""
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for blok in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(blok)
+    return h.hexdigest()
+
+
+def seen_yukle() -> dict:
+    """Map of sha256 -> result dir for media that was already processed."""
+    dosya = WORK / "processed.json"
+    if not dosya.is_file():
+        return {}
+    try:
+        return json.loads(dosya.read_text())
+    except Exception:
+        return {}
+
+
+def seen_kaydet(kayit: dict) -> None:
+    try:
+        WORK.mkdir(parents=True, exist_ok=True)
+        (WORK / "processed.json").write_text(json.dumps(kayit, ensure_ascii=False, indent=1))
+    except Exception:
+        pass
+
+
 def ensure_dirs() -> None:
     for d in (INBOX, WORK, OUTBOX, FAILURES, LOGS):
         d.mkdir(parents=True, exist_ok=True)
