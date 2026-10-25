@@ -31,19 +31,35 @@ else
   say "WARN skill dir not found: $SKILLS_DIR (set MP_SKILLS_DIR)"
 fi
 
-# 3) MCP server manifest (stdio transport)
+# 3) MCP server: manifest + agent kaydi (tanima = agent'in sunucuyu gormesi)
 cat > "$PROJ/mcp-server.json" <<JSON
 {
   "mcpServers": {
     "media-pipeline": {
+      "type": "stdio",
       "command": "$PROJ/bin/mp-mcp",
-      "args": [],
-      "transport": "stdio"
+      "cwd": "$PROJ"
     }
   }
 }
 JSON
 say "mcp manifest -> $PROJ/mcp-server.json"
+
+PRIME_AGENT_BIN="$(command -v prime-agent || true)"
+if [ -z "$PRIME_AGENT_BIN" ]; then
+  for cand in "$HOME/.local/share/prime-agent"/*/prime-agent; do
+    [ -x "$cand" ] && PRIME_AGENT_BIN="$cand" && break
+  done
+fi
+if [ -n "$PRIME_AGENT_BIN" ] && [ -x "$PRIME_AGENT_BIN" ]; then
+  "$PRIME_AGENT_BIN" mcp add media-pipeline --force --cwd "$PROJ" -- "$PROJ/bin/mp-mcp" \
+    && say "mcp registered -> \$HOME/.prime/agent/settings.json" \
+    || say "WARN could not register the MCP server"
+  "$PRIME_AGENT_BIN" mcp list | sed 's/^/  /'
+else
+  say "WARN prime-agent CLI not found; register manually:"
+  say "  prime-agent mcp add media-pipeline --cwd $PROJ -- $PROJ/bin/mp-mcp"
+fi
 
 # 4) systemd user units: inbox path trigger
 cat > "$USER_UNIT_DIR/mp-inbox.path" <<UNIT
@@ -80,6 +96,32 @@ else
   say "WARN systemctl not available; enable mp-inbox.path manually"
 fi
 
-# 6) self test
+# 6) skill dosyalari tam mi?
+for f in SKILL.md references/engines.md references/triggers.md references/recipes.md; do
+  if [ -f "$SKILLS_DIR/media-pipeline/$f" ]; then
+    say "  skill ok: $f"
+  else
+    say "  WARN skill missing: $f"
+  fi
+done
+
+# 7) MCP sunucusu gercekten el koynuyor mu? (stdio handshake)
+if "$PROJ/bin/mp-mcp" <<'JSON' 2>/dev/null | grep -q '"media_engines"'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+JSON
+then
+  say "mcp handshake ok (tools/list answered)"
+else
+  say "WARN mcp handshake failed"
+fi
+
+# 8) systemd durumu
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user is-enabled mp-inbox.path | sed 's/^/  mp-inbox.path: /' || true
+  systemctl --user is-active mp-inbox.path | sed 's/^/  mp-inbox.path: /' || true
+fi
+
+# 9) self test
 "$PROJ/bin/mp" selftest || true
 say "done"

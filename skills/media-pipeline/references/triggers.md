@@ -21,6 +21,22 @@ does the rest, so there is one processing path for every source.
 
     mp watch
 
+## 4. Agent and MCP surface
+
+The MCP server is registered in the user settings of the agent, not only in the
+repository manifest:
+
+    /home/opc/.prime/agent/settings.json
+      "mcpServers": { "media-pipeline": { "type": "stdio", "command": ".../bin/mp-mcp" } }
+
+Tools: `media_engines`, `media_probe`, `media_process`, `media_translate`,
+`media_batch`. A changed registration is picked up by a new session; the live
+server reports `connected` with `source: user`.
+
+Check the whole surface at any time:
+
+    mp doctor
+
 ## Ordering and failure handling
 
 - Files are processed oldest first.
