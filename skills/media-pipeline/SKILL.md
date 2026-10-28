@@ -14,7 +14,7 @@ media lands.
 
     /home/opc/work/prime/media-pipeline
 
-    bin/mp              CLI: probe | process | translate | list | watch | selftest
+    bin/mp              CLI: probe | process | translate | list | watch | selftest | doctor
     bin/mp-mcp          MCP server (stdio JSON-RPC), tools:
                          media_engines, media_probe, media_process,
                          media_translate, media_batch
@@ -61,6 +61,10 @@ media lands.
 
     # extract text then translate it
     /home/opc/work/prime/media-pipeline/bin/mp translate FILE --target tr
+
+    # check the whole installation: engines, skill files, MCP registration,
+    # the inbox trigger and the provider chain. Exit code 1 on a critical fault.
+    /home/opc/work/prime/media-pipeline/bin/mp doctor
 
 ## Rules
 

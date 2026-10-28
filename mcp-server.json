@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "media-pipeline": {
+      "type": "stdio",
       "command": "/home/opc/work/prime/media-pipeline/bin/mp-mcp",
-      "args": [],
-      "transport": "stdio"
+      "cwd": "/home/opc/work/prime/media-pipeline"
     }
   }
 }

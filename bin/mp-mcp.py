@@ -80,7 +80,7 @@ def _limits() -> list[str]:
         "OCR uses PP-OCRv4 through ONNX Runtime; handwritten or low contrast text may be missed.",
     ]
     if not C.LITELLM_KEY:
-        lim.append("Translation needs MP_LITELLM_KEY; without it the agent must translate the extracted text itself.")
+        lim.append("Translation runs through the provider chain: Pollinations works without a key, then Google AI Studio or the LiteLLM proxy when they are configured.")
     return lim
 
 
