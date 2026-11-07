@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""mp-mcp - MCP server exposing the media pipeline over stdio JSON-RPC.
+"""mp-mcp - MCP server for the media pipeline over stdio JSON-RPC.
 
-Packaging follows the Z-Rea delivery pattern: one MCP server, one CLI, one
-agent skill. Tools return JSON in text content plus structured content, and
-every result carries the evidence and the limitations behind it.
+Tools return JSON as text content and as structured content. Each result
+includes evidence and limitations.
 """
 from __future__ import annotations
 

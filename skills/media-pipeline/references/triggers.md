@@ -1,45 +1,32 @@
 # Triggers
 
-## 1. Inbox watch (systemd path unit)
+## Inbox watch
 
-    /home/opc/.config/systemd/user/mp-inbox.path
-    /home/opc/.config/systemd/user/mp-inbox.service
+`install.sh` writes:
 
-The path unit watches `inbox/` for `PathChanged` and runs `mp watch`, which
-processes every file in the inbox and moves it to `outbox/` or `failures/`.
-No inotify-tools package is needed: systemd path units use the kernel
-inotify interface directly.
+    ~/.config/systemd/user/mp-inbox.path
+    ~/.config/systemd/user/mp-inbox.service
 
-## 2. Telegram bridge
+The path unit uses `PathChanged` on `inbox/` and starts `mp watch`. systemd path units use inotify. No inotify-tools package is required.
 
-`prime-tg` receives Telegram updates on 127.0.0.1:8787 through the HAProxy
-hop at 150.136.227.159. A photo, document, video or audio attachment is
-downloaded with `getFile` and written into `inbox/`. The path unit above then
-does the rest, so there is one processing path for every source.
+`systemd/mp-inbox.path` and `systemd/mp-inbox.service` in the repo are the same units with `/home/opc/work/prime/media-pipeline` filled in. The service `install.sh` writes also sets `After=default.target`. `ExecStart` is `bin/mp watch`. `TimeoutStartSec` is 1800.
 
-## 3. Manual
+## Manual
 
-    mp watch
+    bin/mp watch
 
-## 4. Agent and MCP surface
+## What watch does
 
-The MCP server is registered in the user settings of the agent, not only in the
-repository manifest:
+- Non-hidden files in `inbox/` run in sorted filename order.
+- A job directory is `outbox/<epoch>_<stem>/` and contains `manifest.json`.
+- After a successful job, the input file moves to `outbox/`.
+- After an error, the input file moves to `failures/`.
+- A sha256 already listed in `work/processed.json` stays in `inbox/`.
 
-    /home/opc/.prime/agent/settings.json
-      "mcpServers": { "media-pipeline": { "type": "stdio", "command": ".../bin/mp-mcp" } }
+## MCP
 
-Tools: `media_engines`, `media_probe`, `media_process`, `media_translate`,
-`media_batch`. A changed registration is picked up by a new session; the live
-server reports `connected` with `source: user`.
+`bin/mp-mcp` tools: `media_engines`, `media_probe`, `media_process`, `media_translate`, `media_batch`.
 
-Check the whole surface at any time:
+When a `prime-agent` binary is installed, `install.sh` runs `prime-agent mcp add`. `mp doctor` then looks for that entry in `~/.prime/agent/settings.json`. It also looks for `$HOME/bin/prime-tg`. That program is not in this repository, and a missing file is a critical `doctor` failure.
 
-    mp doctor
-
-## Ordering and failure handling
-
-- Files are processed oldest first.
-- A file that fails goes to `failures/` and the reason is in the manifest.
-- Output files are named `<epoch>_<stem>` so repeated runs never collide.
-- Nothing is deleted from the inbox until the result exists in the outbox.
+    bin/mp doctor

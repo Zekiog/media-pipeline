@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""media-pipeline core: probe / process / translate for video, audio and images.
+"""media-pipeline core: probe, process, and translate for video, audio, and images.
 
-CPU-only, no torch, ARM-native. Engines:
-  FFmpeg          - format normalization, audio extraction, thumbnails
-  faster-whisper  - speech to text (int8)
-  RapidOCR        - PP-OCRv4 text detection on images (ONNX)
-  LiteLLM proxy   - translation and image description (optional)
+CPU transcription with faster-whisper (int8 by default). Engines:
+  FFmpeg          video normalize, audio extract, thumbnails
+  faster-whisper  speech to text
+  RapidOCR        PP-OCRv4 on images through ONNX Runtime
+  Pollinations, Gemini, or LiteLLM   optional translation
 """
 from __future__ import annotations
 
@@ -440,11 +440,11 @@ def translate_text(text: str, target: str = TRANSLATE_TARGET,
     return {"error": "; ".join(hatalar), "target": target, "source": source}
 
 def describe_image(path: Path) -> dict[str, Any]:
-    """Describe an image with a vision model.
+    """Describe an image with Gemini or a LiteLLM vision model.
 
-    Provider chain: keyless Pollinations vision first, then the LiteLLM proxy
-    when an API key is configured. Pollinations allows one reply per 30 s per
-    IP, so a rate limit is reported instead of blocking the job.
+    Pollinations is skipped. Gemini needs MP_GEMINI_KEY. LiteLLM needs
+    MP_LITELLM_KEY and MP_LITELLM_MODEL. The CLI and the MCP server do not
+    call this function.
     """
     import base64
     import mimetypes
