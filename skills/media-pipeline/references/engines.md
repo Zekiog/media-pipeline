@@ -42,9 +42,9 @@ keeps it fast.
 
 PP-OCRv4 detects and reads printed text well (measured mean confidence 0.97
 on a clean synthetic image). It struggles with handwriting, very low contrast,
-rotated text and text over busy backgrounds. For those cases use a vision
-model (see the provider table below) and treat the result as a description
-rather than an exact transcription.
+rotated text and text over busy backgrounds. Gemini or LiteLLM can describe
+an image through `describe_image` in `bin/mp_core.py`. That function is not
+wired to `bin/mp` or `bin/mp-mcp`.
 
 ## FFmpeg limits on this host
 
@@ -57,28 +57,25 @@ The provider chain is selected with `MP_LLM_PROVIDER`:
 
 | Value | Behaviour |
 |---|---|
-| `auto` (default) | Pollinations (keyless), then Gemini, then LiteLLM |
+| `auto` (default) | Pollinations, then Gemini when `MP_GEMINI_KEY` is set, then LiteLLM when `MP_LITELLM_KEY` is set |
 | `pollinations` | keyless Pollinations only |
 | `gemini` | Google AI Studio only |
 | `litellm` | LiteLLM proxy only |
-| `none` | no provider, the agent translates instead |
+| `none` | no provider; translation returns an error |
 
 | Provider | Key needed | Vision | Notes |
 |---|---|---|---|
-| Pollinations | no | no | classic API, model `openai-fast` (gpt-oss-20b), text only |
+| Pollinations | no | no | classic API, `MP_POLLINATIONS_MODEL` default `openai`, text only |
 | Google AI Studio | yes | yes | free tier, `gemini-2.0-flash`, `MP_GEMINI_KEY` |
 | LiteLLM proxy | yes | yes | `MP_LITELLM_KEY` and `MP_LITELLM_MODEL` |
 
-Pollinations needs no account and no key, so translation works out of the
-box. Its classic endpoint is `https://text.pollinations.ai/openai` and it
-answers a POST with an OpenAI compatible body. The free tier allows one reply
-every 30 seconds per IP, so a second call inside that window returns HTTP 402
-with `FREE_LIMIT` and a `Retry after Ns` hint. The client waits for that
-window once and retries; a second limit is reported as an error instead of
-looping.
+Pollinations needs no account and no key. The default model id is `openai`
+(`MP_POLLINATIONS_MODEL`). The endpoint defaults to
+`https://text.pollinations.ai/openai` and accepts a POST with an OpenAI
+compatible body. A free-tier HTTP 402 with `FREE_LIMIT` and `Retry after Ns`
+is waited out once, up to `MP_POLLINATIONS_WAIT` seconds (default 35), and
+then reported.
 
-The classic Pollinations model list is text only (`vision: false`), so image
-descriptions need a key: set `MP_GEMINI_KEY` for the Google AI Studio free
-tier, or point `MP_LITELLM_BASE` and `MP_LITELLM_KEY` at the LiteLLM proxy.
-Printed text in images does not need a vision model at all: RapidOCR already
-reads it on CPU.
+`describe_image` in `bin/mp_core.py` skips Pollinations and calls Gemini or
+LiteLLM. The CLI and the MCP server do not call it. Printed text goes through
+RapidOCR.

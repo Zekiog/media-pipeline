@@ -150,7 +150,7 @@ def doctor() -> dict:
             rc2, out2 = _run(["systemctl", "--user", "is-active", unit], timeout=20)
             ekle(f"systemd:{unit}:active", rc2 == 0, out2 or "bilinmiyor", kritik=False)
 
-    # prime-tg entegrasyonu
+    # Host binary outside this repo. A missing file is a critical doctor failure.
     ptg = Path.home() / "bin/prime-tg"
     ekle("prime-tg:binary", ptg.is_file(), str(ptg) if ptg.is_file() else "bulunamadi")
     mp_bin = C.ROOT / "bin/mp"
@@ -193,8 +193,7 @@ def process_file(src: Path, do_stt: bool = True, do_ocr: bool = True,
     if kind == "unknown":
         return {"error": f"unsupported media type: {src.suffix}"}
 
-    # Ayni icerik daha once islendiyse tekrar islemeyelim: Telegram akisinda
-    # prime-tg ve mp watch ayni dosyayi gorur.
+    # Skip a file whose sha256 is already in work/processed.json.
     digest = C.dosya_hash(src)
     oncekiler = C.seen_yukle()
     if digest in oncekiler:

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # media-pipeline installer.
-# Installs the skill into the agent's own skill directory, writes the MCP
-# server manifest, creates the working layout, and enables the inbox trigger.
-# Safe to re-run: every step is idempotent and existing files are backed up.
+# Creates inbox, work, outbox, failures, and logs. Copies the skill into
+# MP_SKILLS_DIR when that directory already exists (default
+# $HOME/.local/share/prime-agent/0.9.6/skills). Rewrites mcp-server.json.
+# Runs `prime-agent mcp add` when that binary is present. Writes the inbox
+# user units and enables the path unit. Overwrites those files on a re-run.
+# Does not keep backups.
 set -euo pipefail
 
 PROJ="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -21,7 +24,7 @@ for d in inbox work outbox failures logs; do
 done
 say "layout ready"
 
-# 2) skill into the agent's own skill directory
+# 2) skill copy into MP_SKILLS_DIR/media-pipeline when the directory exists
 if [ -d "$SKILLS_DIR" ]; then
   mkdir -p "$SKILLS_DIR/media-pipeline/references"
   cp -f "$PROJ/skills/media-pipeline/SKILL.md" "$SKILLS_DIR/media-pipeline/SKILL.md"
@@ -31,7 +34,7 @@ else
   say "WARN skill dir not found: $SKILLS_DIR (set MP_SKILLS_DIR)"
 fi
 
-# 3) MCP server: manifest + agent kaydi (tanima = agent'in sunucuyu gormesi)
+# 3) MCP manifest in this repo, then prime-agent mcp add when the binary exists
 cat > "$PROJ/mcp-server.json" <<JSON
 {
   "mcpServers": {
@@ -96,7 +99,7 @@ else
   say "WARN systemctl not available; enable mp-inbox.path manually"
 fi
 
-# 6) skill dosyalari tam mi?
+# 6) copied skill files present?
 for f in SKILL.md references/engines.md references/triggers.md references/recipes.md; do
   if [ -f "$SKILLS_DIR/media-pipeline/$f" ]; then
     say "  skill ok: $f"
@@ -105,7 +108,7 @@ for f in SKILL.md references/engines.md references/triggers.md references/recipe
   fi
 done
 
-# 7) MCP sunucusu gercekten el koynuyor mu? (stdio handshake)
+# 7) MCP stdio handshake: initialize, then tools/list
 if "$PROJ/bin/mp-mcp" <<'JSON' 2>/dev/null | grep -q '"media_engines"'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
@@ -116,7 +119,7 @@ else
   say "WARN mcp handshake failed"
 fi
 
-# 8) systemd durumu
+# 8) user systemd unit status
 if command -v systemctl >/dev/null 2>&1; then
   systemctl --user is-enabled mp-inbox.path | sed 's/^/  mp-inbox.path: /' || true
   systemctl --user is-active mp-inbox.path | sed 's/^/  mp-inbox.path: /' || true

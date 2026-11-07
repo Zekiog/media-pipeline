@@ -34,10 +34,3 @@ Audio must be 16 kHz mono PCM:
 
     systemctl --user daemon-reload
     systemctl --user enable --now worker.path
-
-## Telegram file download
-
-    getFile with the file_id, then fetch
-    https://api.telegram.org/file/bot<token>/<file_path>
-
-Keep the token out of logs and out of error text.
